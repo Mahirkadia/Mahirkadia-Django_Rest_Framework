@@ -1,0 +1,102 @@
+from rest_framework import serializers
+from .models import User,Song,Singer
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
+from django.contrib.auth.models import Permission
+
+User = get_user_model()
+
+class PermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Permission
+        fields = ('id', 'name')
+
+
+class UserSerializer(serializers.ModelSerializer):
+    # permissions = PermissionSerializer(many=True, required=False)
+    role = serializers.ChoiceField(choices=[])
+    # permissions = serializers.JSONField(required=False, allow_null=True)
+    permissions = serializers.PrimaryKeyRelatedField(queryset=Permission.objects.all(), many=True, required=False)
+
+    class Meta:
+        model = User
+        fields = ('email', 'username', 'password', 'role', 'permissions')
+        extra_kwargs = {'password': {'write_only': True}}
+
+    def __init__(self, *args, **kwargs):
+        super(UserSerializer, self).__init__(*args, **kwargs)
+        # Dynamically set the choices for the role field
+        # self.fields['role'].choices = [(group.name, group.name) for group in Group.objects.all()]
+        self.fields['role'].choices = User.get_role_choices()
+
+    def create(self, validated_data):
+        permissions_data = validated_data.pop('permissions', [])
+        user = User.objects.create_user(
+            email=validated_data['email'],
+            password=validated_data['password'],
+            username=validated_data['username'],
+            role=validated_data['role']
+        )
+        user.user_permissions.set(permissions_data)
+        return user
+        
+        # for perm_data in permissions_data:
+        #     permission = Permission.objects.get(id=perm_data['id'])
+        #     user.user_permissions.add(permission)
+        # return user
+    
+    def update(self, instance, validated_data):
+        permissions = validated_data.pop('permissions', None)
+        if permissions is not None:
+            instance.user_permissions.set(permissions)
+        return super().update(instance, validated_data)
+    
+    # def create(self, validated_data):
+    #     user = User.objects.create_user( # type: ignore
+    #         email=validated_data['email'],
+    #         password=validated_data['password'],
+    #         username=validated_data['username'],
+    #         role=validated_data['role']
+    #     )
+    #     return user
+
+class SongSerializer(serializers.ModelSerializer):
+    singer_name = serializers.SerializerMethodField()
+    class Meta:
+        model = Song
+        fields = ['id', 'title', 'singer', 'singer_name', 'duration']  
+        
+    def get_singer_name(self, obj):
+        return obj.singer.name
+              
+class SingerSerializer(serializers.ModelSerializer):
+    songs = serializers.StringRelatedField(many=True,read_only=True)
+    class Meta:
+        model = Singer
+        fields = ['id', 'name', 'gender','songs']
+        
+class GroupSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255)
+
+***************************************views.py**************************************
+
+# class LoginView(generics.GenericAPIView):
+#     permission_classes = [AllowAny]
+#     serializer_class = UserSerializer
+
+#     def post(self, request, *args, **kwargs):
+#         email = request.data.get('email')
+#         password = request.data.get('password')
+#         user = User.objects.filter(email=email).first()
+
+#         if user and user.check_password(password):
+#             refresh = RefreshToken.for_user(user)
+#             return Response({
+#                 'username': user.username,
+#                 'email': user.email,
+#                 'role': user.role,
+#                 'refresh': str(refresh),
+#                 'access': str(refresh.access_token), # type: ignore
+#                 'message': 'User logged in successfully',
+#             })
+#         return Response({"detail": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
